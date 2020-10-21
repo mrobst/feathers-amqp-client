@@ -112,7 +112,7 @@ async function bindStream(fn, config) {
   let channel;
 
   function consume(message) {
-    console.log('consume function with message', message.content.toString());
+    // console.log('consume function with message', message.content.toString());
     const content = JSON.parse(message.content.toString());
 
     // for backwards-compatibility. sometimes the message content is double-strinigified

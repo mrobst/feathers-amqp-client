@@ -62,7 +62,7 @@ async function pushStream(message, config) {
     disconnectTasks.push(close);
 
     console.log('Feathers-AMQP-Client: Waiting to publish messages in %s.', config.queue.name);
-    console.log('Feathers-AMQP-Client: Message to send is ', message);
+    //console.log('Feathers-AMQP-Client: Message to send is ', message);
     return channel.publish(config.exchange.name, queue.queue, Buffer.from(message), { noAck: true });
   }
 

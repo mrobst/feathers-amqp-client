@@ -59,7 +59,7 @@ async function pushStream(message, config) {
 
     // create an exchange per config parameters with defaults if not provided
     publishChannel.assertExchange(config.exchange.name, config.exchange.type || 'fanout', {
-      durable: config.durable || false,
+      durable: config.exchange.durable || false,
     });
 
     // reuse existing queue.... and binding....?
@@ -67,8 +67,9 @@ async function pushStream(message, config) {
       console.log('Feathers-AMQP-Client: pushStream: NO QUEUE');
 
       // create a queue per config parameters
-      publishQueue = await publishChannel.assertQueue(config.queue.name, {
+      publishQueue = await publishChannel.assertQueue(config.queue.name || '', {
         exclusive: config.queue.exclusive || false,
+        durable: config.queue.durable,
       });
 
       // bind the queue to an exchange with a routing key
@@ -79,7 +80,7 @@ async function pushStream(message, config) {
         'edge'
       );
 
-      await publishChannel.bindQueue(publishQueue.queue, config.exchange.name, 'edge');
+      await publishChannel.bindQueue(publishQueue.queue, config.exchange.name, config.routing_key);
     } // end if publishQueue - should exist and be bound here
 
     exitHook(close);
@@ -89,11 +90,11 @@ async function pushStream(message, config) {
     console.log(
       'Feathers-AMQP-Client: pushStream: Publishing message to exchange %s with routing key %s.',
       config.exchange.name,
-      'edge'
+      config.routing_key
     );
     // console.log('Feathers-AMQP-Client: Message to send is ', message);
     // return publishChannel.publish(config.exchange.name, publishQueue.queue, Buffer.from(message), { noAck: true });
-    return publishChannel.publish(config.exchange.name, 'edge', Buffer.from(message), { noAck: true });
+    return publishChannel.publish(config.exchange.name, config.routing_key, Buffer.from(message), { noAck: true });
   }
 
   async function close() {
@@ -181,10 +182,13 @@ async function bindStream(fn, config) {
     });
 
     channel.assertExchange(config.exchange.name, config.exchange.type || 'fanout', {
-      durable: config.durable || false,
+      durable: config.exchange.durable || false,
     });
 
-    const queue = await channel.assertQueue(config.queue.name, { exclusive: config.queue.exclusive || false });
+    const queue = await channel.assertQueue(config.queue.name, {
+      exclusive: config.queue.exclusive || false,
+      durable: config.queue.durable,
+    });
 
     console.log('Feathers-AMQP-Client: Binding queue %s with exchange %s', config.queue.name, config.exchange.name);
     await channel.bindQueue(queue.queue, config.exchange.name);

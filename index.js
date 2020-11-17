@@ -2,6 +2,8 @@ const amqp = require('amqplib');
 const exitHook = require('async-exit-hook');
 
 let connection;
+let publishChannel; // outside of the function to persist
+let publishQueue; // outside of the function to persist
 const disconnectTasks = [];
 let clientClosed = false;
 
@@ -10,7 +12,7 @@ const sleepSeconds = (seconds) => new Promise((resolve) => setTimeout(resolve, s
 // function to publish to amqp
 async function pushStream(message, config) {
   const { maxRetries = Infinity, server = config.server.name, reconnectDelay = 5 } = config;
-  let channel;
+  // let channel;
 
   /*   function publish(message) {
       const content = JSON.parse(message.content);
@@ -24,53 +26,81 @@ async function pushStream(message, config) {
     // reuse an existing connection if present
     if (!connection) {
       // console.log('server name from feathers-amqp-client initialize is ', server);
+      console.log('Feathers-AMQP-Client: pushStream: NO CONNECTION');
       connection = await amqp.connect(server.name).catch((error) => console.log('amqp.connect error ', error));
     }
 
-    channel = await connection.createChannel();
+    // reuse an existing channel if present....?
+    if (!publishChannel) {
+      console.log('Feathers-AMQP-Client: pushStream: NO CHANNEL');
+      // create a channel
+      publishChannel = await connection.createChannel();
+    }
 
     // If some error causes the channel or the connection to go down, attempt to reconnect
-    channel.on('error', (e) => {
-      console.error('Feathers-AMQP-Client: Channel closed with error', { reason: e });
+    publishChannel.on('error', (e) => {
+      console.error('Feathers-AMQP-Client: pushStream: Channel closed with error', { reason: e });
       attemptReconnect();
     });
 
     connection.on('error', (e) => {
-      console.error('Feathers-AMQP-Client: Connection closed with error', { reason: e });
+      console.error('Feathers-AMQP-Client: pushStream: Connection closed with error', { reason: e });
       attemptReconnect();
     });
 
     // When the channel is closed by the server, attempt to reconnect
     // Do not respond to a closed connection - the reconnect is handled by the closed channel
-    channel.on('close', () => {
+    publishChannel.on('close', () => {
       if (clientClosed) return;
 
-      console.error('Feathers-AMQP-Client: Channel closed by server');
+      console.error('Feathers-AMQP-Client: pushStream: Channel closed by server');
       attemptReconnect();
     });
 
-    channel.assertExchange(config.exchange.name, config.exchange.type || 'fanout', {
+    // create an exchange per config parameters with defaults if not provided
+    publishChannel.assertExchange(config.exchange.name, config.exchange.type || 'fanout', {
       durable: config.durable || false,
     });
 
-    const queue = await channel.assertQueue(config.queue.name, { exclusive: config.queue.exclusive || false });
+    // reuse existing queue.... and binding....?
+    if (!publishQueue) {
+      console.log('Feathers-AMQP-Client: pushStream: NO QUEUE');
 
-    console.log('Feathers-AMQP-Client: Binding queue %s with exchange %s', config.queue.name, config.exchange.name);
-    await channel.bindQueue(queue.queue, config.exchange.name);
+      // create a queue per config parameters
+      publishQueue = await publishChannel.assertQueue(config.queue.name, {
+        exclusive: config.queue.exclusive || false,
+      });
+
+      // bind the queue to an exchange with a routing key
+      console.log(
+        'Feathers-AMQP-Client: pushStream: Binding queue %s with exchange %s and routing key %s',
+        config.queue.name,
+        config.exchange.name,
+        'edge'
+      );
+
+      await publishChannel.bindQueue(publishQueue.queue, config.exchange.name, 'edge');
+    } // end if publishQueue - should exist and be bound here
 
     exitHook(close);
     disconnectTasks.push(close);
 
-    console.log('Feathers-AMQP-Client: Waiting to publish messages in %s.', config.queue.name);
-    //console.log('Feathers-AMQP-Client: Message to send is ', message);
-    return channel.publish(config.exchange.name, queue.queue, Buffer.from(message), { noAck: true });
+    // console.log('Feathers-AMQP-Client: pushStream: Publishing message in %s.', config.queue.name);
+    console.log(
+      'Feathers-AMQP-Client: pushStream: Publishing message to exchange %s with routing key %s.',
+      config.exchange.name,
+      'edge'
+    );
+    // console.log('Feathers-AMQP-Client: Message to send is ', message);
+    // return publishChannel.publish(config.exchange.name, publishQueue.queue, Buffer.from(message), { noAck: true });
+    return publishChannel.publish(config.exchange.name, 'edge', Buffer.from(message), { noAck: true });
   }
 
   async function close() {
-    console.log('Feathers-AMQP-Client: Disconnecting from AMQP server...');
+    console.log('Feathers-AMQP-Client: pushStream: Disconnecting from AMQP server...');
     clientClosed = true;
     try {
-      await channel.close();
+      await publishChannel.close();
       return connection.close();
     } catch (error) {
       // ignore errors here in case the connection has already been closed
@@ -89,18 +119,18 @@ async function pushStream(message, config) {
     // unless the retries are down to zero
     if (reconnectRetries > 0) {
       console.error(
-        `Feathers-AMQP-Client: Attempting to reconnect.
+        `Feathers-AMQP-Client: pushStream: Attempting to reconnect.
         Retries: ${reconnectRetries}, reconnect delay: ${reconnectDelay}s`
       );
       sleepSeconds(reconnectDelay)
         .then(() => initialize(reconnectRetries - 1))
         .catch((error) => {
           // reconnection failed - try again (decrementing retries)
-          console.error('Feathers-AMQP-Client: Reconnection failed', { reason: error });
+          console.error('Feathers-AMQP-Client: pushStream: Reconnection failed', { reason: error });
           return attemptReconnect(reconnectRetries - 1);
         });
     } else {
-      console.error('Feathers-AMQP-Client: No more retries - giving up reconnecting');
+      console.error('Feathers-AMQP-Client: pushStream: No more retries - giving up reconnecting');
     }
   }
 
